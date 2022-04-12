@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.0)
+
+if(MOUSECORE_NATIVE)
+  add_definitions(-DUSE_MOUSECORE_NATIVE)
+  set(THIS_INC "")
+  set(THIS_LIBPTH "")
+  set(THIS_LIB SetupAPI CfgMgr32 Winusb)
+else()
+  set(THIS_INC ${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb)
+  set(THIS_LIBPTH ${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb/MS64)
+  set(THIS_LIB libusb-1.0)
+  include_directories(${THIS_INC})
+  link_directories(${THIS_LIBPTH})
+endif()
+
+add_library(mousecore 
+
+STATIC
+
+libusb_utils.cpp
+usb_utils.cpp
+mousecore.cpp 
+)
+target_link_libraries(mousecore ${THIS_LIB})
+
+#This is for dll moving
+add_custom_command(TARGET mousecore POST_BUILD
+COMMAND ${CMAKE_COMMAND} -E copy_directory
+"${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb/MS64"
+$<TARGET_FILE_DIR:mousecore>)
+
+# for parent directory
+set(NPNXWINUSB_INC ${THIS_INC} PARENT_SCOPE)
+set(NPNXWINUSB_LIBPTH ${THIS_LIBPTH} PARENT_SCOPE)
+set(NPNXWINUSB_LIB mousecore ${THIS_LIB} PARENT_SCOPE)
