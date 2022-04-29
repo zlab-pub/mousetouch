@@ -69,20 +69,21 @@ RectLayer::RectLayer(float left, float bottom, float right, float top, float z)
 
 int RectLayer::DrawGL(const int nbFrames)
 {
-    NPNX_ASSERT(!mTexture.empty());
 
-    // Here we should do the following thing to return to default texture for GL_TEXTUREi for parent renderer.
-    // But in our program we guarantte that GL_TEXTURE0 is set for every rect, so we need not to reset it.
+  NPNX_ASSERT(!mTexture.empty());
 
-    // int prevTextureBinding;
-    // glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTextureBinding);
-    // ...
-    // glBindTexture(GL_TEXTURE_2D, prevTextureBinding);
-    // TODO(after the thesis): found the texture type (i.e. GL_TEXTURE_3D) for current GL_TEXTUREi.
+  // Here we should do the following thing to return to default texture for GL_TEXTUREi for parent renderer.
+  // But in our program we guarantte that GL_TEXTURE0 is set for every rect, so we need not to reset it.
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mTexture[textureNoCallback(nbFrames)]);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)(mEBOOffset * sizeof(GLuint)));
-
-    return 0;
+  // int prevTextureBinding;
+  // glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTextureBinding);
+  // ...
+  // glBindTexture(GL_TEXTURE_2D, prevTextureBinding);
+  // TODO(after the thesis): found the texture type (i.e. GL_TEXTURE_3D) for current GL_TEXTUREi.
+  
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, mTexture[textureNoCallback(nbFrames)]);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void *)(mEBOOffset * sizeof(GLuint)));
+  
+  return 0;
 }

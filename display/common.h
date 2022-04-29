@@ -74,6 +74,8 @@
 #define NPNX_PY_EXECUTABLE "target.py"
 #endif
 
+#define SP_REPORT_SIZE 5
+
 // CAUTION : Use this will make the pointer invalid immediately after the caller end.
 //  which means if the caller save this pointer for another use after the call, it will be a SEGFAULT.
 #define NPNX_FETCH_DATA(A) ((std::string((NPNX_DATA_PATH)) + "/" + (A)).c_str())

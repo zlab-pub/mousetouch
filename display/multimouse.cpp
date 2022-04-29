@@ -19,6 +19,7 @@ MouseInstance::MouseInstance(MultiMouseSystem* parent, int hDevice) :
 }
 
 void MouseInstance::SetMousePos(double xCoord, double yCoord) {
+    std::cout << "SetMousePos: x, " << xCoord << "  y, " << yCoord << std::endl;
     //set mouse coord to origin, and then set the origin in screencoord.
     std::lock_guard<std::recursive_mutex> lck(objectMutex);
     mMousePosX = 0;
@@ -198,8 +199,8 @@ void MultiMouseSystem::PollMouseEvents() {
                 hciToScreenPosFunc(hciReport.param1, hciReport.param2, &x, &y);
                 mouses[hciReport.index]->SetMousePos(x, y);
                 mouseButtonCallback(hciReport.index, 0xffffffff, GLFW_PRESS, (double)hciReport.param1, (double)hciReport.param2);
-                this->hciController.instances[hciReport.index]->tokenReport.x = hciReport.param1;
-                this->hciController.instances[hciReport.index]->tokenReport.y = hciReport.param2;
+                this->hciController.instances[hciReport.index]->tokenReport.y = hciReport.param1;
+                this->hciController.instances[hciReport.index]->tokenReport.x = hciReport.param2;
 
                 if (mEnableAngle) {
                     RectLayer* targetLayer = dynamic_cast<RectLayer*> (postMouseRenderer->mLayers[*(float*)&hciReport.index]);
@@ -225,9 +226,9 @@ void MultiMouseSystem::PollMouseEvents() {
             case HCIMESSAGEOUTTYPE_ANGLE:
             {
                 float angleInRad = *(float*)&hciReport.param1;
-                NPNX_LOG(angleInRad / 3.1415926535897f);
+                //NPNX_LOG(angleInRad / 3.1415926535897f);
                 mouses[hciReport.index]->SetMouseAngle(angleInRad);
-                this->hciController.instances[hciReport.index]->tokenReport.angle = angleInRad / 3.1415926535897f * 360;
+                this->hciController.instances[hciReport.index]->tokenReport.angle = *(int32_t*)&hciReport.param2;
                 this->hciController.instances[hciReport.index]->tokenReport.isCompleted = true;
                 RectLayer* targetLayer = dynamic_cast<RectLayer*> (postMouseRenderer->mLayers[*(float*)&hciReport.index]);
                 NPNX_ASSERT(targetLayer);
@@ -263,17 +264,22 @@ void MultiMouseSystem::reportCallback(int hDevice, MouseReport report) {
     mouses[hDevice]->HandleReport(report);
 }
 
-HCIReport MultiMouseSystem::GetHCIReportByIndex(int index) {
+TokenReport MultiMouseSystem::GetTokenReportByIndex(int index) {
     if (index >= this->hciController.mNumMouse) {
-        return HCIReport();
+        return TokenReport();
     }
     return this->hciController.instances[index]->tokenReport;
 }
 
-void MultiMouseSystem::ClearHCIReportByIndex(int index) {
+void MultiMouseSystem::ClearTokenReportByIndex(int index) {
     if (index < this->hciController.mNumMouse) {
         this->hciController.instances[index]->tokenReport.isCompleted = false;
     }
+}
+
+void MultiMouseSystem::Stop() {
+    core.Stop();
+    hciController.Stop();
 }
 
 namespace npnx {

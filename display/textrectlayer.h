@@ -7,7 +7,7 @@ namespace npnx {
 
 	class TextRectLayer : public RectLayer {
 	public:
-		TextRectLayer() : mLeft(0), mBottom(0), mRight(0), mTop(0), mCentrosymmetric(false){};
+		TextRectLayer() : mLeft(0), mBottom(0), mRight(0), mTop(0), mCentrosymmetric(false) {};
 		TextRectLayer(float left, float bottom, float right, float top, float z_index, bool centrosymmetric = false);
 		virtual ~TextRectLayer() = default;
 

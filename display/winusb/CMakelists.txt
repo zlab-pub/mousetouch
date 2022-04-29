@@ -5,6 +5,11 @@ if(MOUSECORE_NATIVE)
   set(THIS_INC "")
   set(THIS_LIBPTH "")
   set(THIS_LIB SetupAPI CfgMgr32 Winusb)
+elseif(MOUSECORE_SP)
+  add_definitions(-DUSE_MOUSECORE_SP)
+  set(THIS_INC "")
+  set(THIS_LIBPTH "")
+  set(THIS_LIB SetupAPI CfgMgr32)
 else()
   set(THIS_INC ${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb)
   set(THIS_LIBPTH ${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb/MS64)
@@ -13,21 +18,30 @@ else()
   link_directories(${THIS_LIBPTH})
 endif()
 
-add_library(mousecore 
+if(MOUSECORE_SP)
+  add_library(mousecore 
 
-STATIC
+  STATIC
+  mousecore.cpp 
+  SerialPort.cpp
+  )
+else()
+  add_library(mousecore 
 
-libusb_utils.cpp
-usb_utils.cpp
-mousecore.cpp 
-)
+  STATIC
+
+  libusb_utils.cpp
+  usb_utils.cpp
+  mousecore.cpp 
+  )
+  #This is for dll moving
+  add_custom_command(TARGET mousecore POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+  "${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb/MS64"
+  $<TARGET_FILE_DIR:mousecore>)
+endif()
 target_link_libraries(mousecore ${THIS_LIB})
 
-#This is for dll moving
-add_custom_command(TARGET mousecore POST_BUILD
-COMMAND ${CMAKE_COMMAND} -E copy_directory
-"${CMAKE_CURRENT_SOURCE_DIR}/3rdParty/libusb/MS64"
-$<TARGET_FILE_DIR:mousecore>)
 
 # for parent directory
 set(NPNXWINUSB_INC ${THIS_INC} PARENT_SCOPE)

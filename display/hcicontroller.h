@@ -36,7 +36,7 @@ struct HCIMessageReport {
   uint32_t param1, param2;
 };
 
-struct HCIReport {
+struct TokenReport {
 	uint32_t x = 0;
   uint32_t y = 0;
 	float angle = 0;
@@ -55,6 +55,7 @@ public:
   ~HCIInstance() = default;
 
   void Start();
+  void Stop();
 
   //should be private but std::thread need a bind or lambda for a member function,
   //or a non-member friend wrapper for this func.
@@ -64,13 +65,14 @@ public:
 public:
   std::atomic<int> messageType = HCIMESSAGEINTYPE_POSITION; 
   std::thread senderThread, receiverThread;
-  HCIReport tokenReport;
+  TokenReport tokenReport;
+  int nowState;
 
 private:
   WCHAR senderPipePath[255], receiverPipePath[255];
   HCIController *mParent;
   int mouseIdx;
-  
+  bool shouldStop = false;
 };
 
 class HCIController {
@@ -80,6 +82,7 @@ public:
 
   void Init(MultiMouseSystem *parent, int num_mouse);
   void Start();
+  void Stop();
 
 public:
   MultiMouseSystem *mParent;

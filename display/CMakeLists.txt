@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.0)
 
-project(MouseTouch_ColorWidget)
+project(Color_Widgets)
 
 set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
-set(MOUSECORE_NATIVE ON CACHE BOOL "USE WINUSB BACKEND" FORCE)
+set(MOUSECORE_NATIVE OFF CACHE BOOL "USE WINUSB BACKEND" FORCE)
+set(MOUSECORE_SP ON CACHE BOOL "FOR SENSOR DEMO" FORCE)
 
 #set this to on to test winusb overlapped io, set to off when doing the demo for best performance.
 set(MOUSECORE_NATIVE_ASYNC OFF CACHE BOOL "USB WINUSB WITH OVERLAPPED IO" FORCE)
@@ -15,9 +16,14 @@ if(MOUSECORE_NATIVE)
   add_definitions(-DUSE_MOUSECORE_NATIVE)
 endif()
 
+if(MOUSECORE_SP)
+  add_definitions(-DUSE_MOUSECORE_SP)
+endif()
+
 if(MOUSECORE_NATIVE_ASYNC)
   add_definitions(-DUSE_MOUSECORE_NATIVE_ASYNC)
 endif()
+
 
 find_package(OpenCV REQUIRED)
 message(STATUS opencv_inc " " ${OpenCV_INCLUDE_DIRS})
@@ -34,6 +40,9 @@ add_subdirectory(3rdParty/glfw)
 include_directories(3rdParty/glew/include)
 include_directories(3rdParty/glfw/include)
 include_directories(${OpenCV_INCLUDE_DIRS})
+
+include_directories(3rdParty/freetype-2.11.1/include)
+link_directories(3rdParty/freetype-2.11.1/objs/x64/ReleaseStatic)
 
 # Required core libraries on various platforms
 if (WIN32)
@@ -89,7 +98,7 @@ add_compile_options(-DNDEBUG)
 
 #add source file here
 add_library(
-  MouseTouch_ColorWidget
+  HCI_display
 
   OBJECT
 
@@ -103,8 +112,8 @@ add_library(
 )
 
 add_executable(
-  demo_sensor
+  sensor_demo
 
-  demo_sensor.cpp
-  $<TARGET_OBJECTS:MouseTouch_ColorWidget>
+  sensor_demo.cpp
+  $<TARGET_OBJECTS:HCI_display>
 )

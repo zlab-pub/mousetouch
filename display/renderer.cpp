@@ -25,17 +25,6 @@ void Renderer::Initialize()
     iter->second->Initialize((int)mVBOBuffer.size() / 5, (int)mEBOBuffer.size());
   }
 
-  // NPNX_LOG(mVBOBuffer.size());
-  // NPNX_LOG(mEBOBuffer.size());
-
-  // for(auto item: mVBOBuffer) {
-  //   NPNX_LOG(item);
-  // }
-
-  // for(auto item:mEBOBuffer) {
-  //   NPNX_LOG(item);
-  // }
-
   glGenVertexArrays(1, &mVAO);
   glGenBuffers(1, &mVBO);
   glGenBuffers(1, &mEBO);

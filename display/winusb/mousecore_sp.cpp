@@ -3,9 +3,9 @@
 #endif
 
 #include "mousecore.h"
-
+#include "../mousefifo.h"
+#include "SerialPort.h"
 #include <windows.h>
-#include <winusb.h>
 #include <SetupAPI.h>
 #include <Cfgmgr32.h>
 #include <Devpkey.h>
@@ -16,248 +16,316 @@
 #include <chrono>
 #include <thread>
 #include <string>
+#include <wchar.h>
+#include <regex>
 
 namespace npnx {
-static void printf_guid(GUID guid) {
-  printf("{%08lX-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX}\n",
-         guid.Data1, guid.Data2, guid.Data3,
-         guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
-         guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-}
+    static void printf_guid(GUID guid) {
+        printf("{%08lX-%04hX-%04hX-%02hhX%02hhX-%02hhX%02hhX%02hhX%02hhX%02hhX%02hhX}\n",
+            guid.Data1, guid.Data2, guid.Data3,
+            guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+            guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+    }
 }
 
 using namespace npnx;
 
-MouseCore::MouseCore() 
-{
-  pInterface_details.clear();
-  h_files.clear();
-  h_winusbs.clear();
-  h_hidinterfaces.clear();
-  mouseReportCallbackFunc = NULL;
+#define BAUDRATE 115200
+
+MouseCore::MouseCore() {
+    serial_interfaces.clear();
+    position_raw_data_init_time.clear();
+    mouseReportCallbackFunc = NULL;
 }
 
 MouseCore::~MouseCore() {
-  for (int i = 0; i < num_mouse; i++) 
-  {
-    free(pInterface_details[i]);
-    if (h_winusbs[i] != h_hidinterfaces[i] && h_hidinterfaces[i] != NULL) {
-      WinUsb_Free(h_hidinterfaces[i]);
+    for (int i = 0; i < num_mouse; i++)
+    {
+        serial_interfaces[i]->closeSerial();
     }
-    WinUsb_Free(h_winusbs[i]);
-    CloseHandle(h_files[i]);
-  }
-  pInterface_details.clear();
-  h_files.clear();
-  h_winusbs.clear();
-  h_hidinterfaces.clear();
+    serial_interfaces.clear();
+    position_raw_data_init_time.clear();
 }
 
-int MouseCore::Init(uint16_t vid, uint16_t pid, MOUSEREPORTCALLBACKFUNC func)
-{
-  mouseReportCallbackFunc = func;
-  GUID winUSBSetupGuid = {0x88BAE032, 0x5A81, 0x49f0, 0xBC, 0x3D, 0xA4, 0xFF, 0x13, 0x82, 0x16, 0xD6};
-  GUID winUSBInterfaceGuid = {0xA5DCBF10, 0x6530, 0x11D2, 0x90, 0x1F, 0x00, 0xC0, 0x4F, 0xB9, 0x51, 0xED};
-  // GUID winUSBInterfaceGuid = {0x0A8FE9DC, 0x086F, 0x4BE7, 0xA6, 0x31, 0x4E, 0x44, 0x15, 0x86, 0x42, 0x2D};
-  // printf_guid(winUSBSetupGuid);
+int MouseCore::Init(uint16_t vid, uint16_t pid, MOUSEREPORTCALLBACKFUNC func) {
+    mouseReportCallbackFunc = func;
 
-  HDEVINFO h_info = SetupDiGetClassDevs(&winUSBInterfaceGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-  NPNX_ASSERT(h_info && h_info != INVALID_HANDLE_VALUE);
+    GUID winDeviceInterfaceGuid = { 0x86E0D1E0, 0x8089, 0x11D0, 0x9C, 0xE4, 0x08, 0x00, 0x3E, 0x30, 0x1F, 0x73 };
 
-  int mouse_cnt = 0;
-  SP_DEVINFO_DATA devinfo_data;
-  SP_DEVICE_INTERFACE_DATA interface_data;
-  interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-  devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
-  int dev_count = 0;
-  while (SetupDiEnumDeviceInterfaces(h_info, NULL, &winUSBInterfaceGuid, dev_count, &interface_data)) {
-    DWORD length;
-    bool suc = SetupDiGetDeviceInterfaceDetail(h_info, &interface_data, NULL, 0, &length, NULL);
-    NPNX_ASSERT(!suc && GetLastError() == ERROR_INSUFFICIENT_BUFFER);
-    
+    HDEVINFO h_info = SetupDiGetClassDevs(&winDeviceInterfaceGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    NPNX_ASSERT(h_info && h_info != INVALID_HANDLE_VALUE);
 
-    PSP_DEVICE_INTERFACE_DETAIL_DATA pInterface_detail = (PSP_DEVICE_INTERFACE_DETAIL_DATA) malloc(length);
-    pInterface_detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-    NPNX_ASSERT_LOG(SetupDiGetDeviceInterfaceDetail(h_info, &interface_data, pInterface_detail, length, NULL, &devinfo_data), GetLastError());
-
-    printf("%ls\n", pInterface_detail->DevicePath);
-    
-    // suc = SetupDiGetDevicePropertyKeys(h_info, &devinfo_data, NULL, 0, &length, 0);
-    // NPNX_ASSERT(!suc && GetLastError() == ERROR_INSUFFICIENT_BUFFER);
-    
-    // DEVPROPKEY * keys = (DEVPROPKEY *) malloc(length * sizeof(DEVPROPKEY));
-
-    // NPNX_ASSERT_LOG(SetupDiGetDevicePropertyKeys(h_info, &devinfo_data, keys, length * sizeof(DEVPROPKEY), NULL, 0), GetLastError()); 
-    // for(int i=0; i<length; i++) {
-    //   printf_guid(keys[i].fmtid);
-    //   printf("%d\n", keys[i].pid);
-    // }
-
-    DEVPROPTYPE valuetype;
-    suc = SetupDiGetDeviceProperty(h_info, &devinfo_data, &DEVPKEY_Device_HardwareIds, &valuetype, NULL, 0, &length, 0);
-    NPNX_ASSERT(!suc && GetLastError() == ERROR_INSUFFICIENT_BUFFER);
-    
-    WCHAR *property_buffer = (WCHAR *) malloc(length);
-    
-    NPNX_ASSERT_LOG(SetupDiGetDeviceProperty(h_info, &devinfo_data, &DEVPKEY_Device_HardwareIds, &valuetype, (PBYTE)property_buffer, length, NULL, 0), GetLastError());
-    // for(int i=0; i<length; i++) {
-    //   printf(property_buffer != 0 ? "%lc" : "\\0", property_buffer[i]);
-    // }
-
-    // if (!memcmp(property_buffer, TEXT("USB\\VID_046"), 11 * sizeof(WCHAR)) && !memcmp(&devinfo_data.ClassGuid, &winUSBSetupGuid, sizeof(GUID))){
-    if (!memcmp(&devinfo_data.ClassGuid, &winUSBSetupGuid, sizeof(GUID))){
-      pInterface_details.push_back(pInterface_detail);
-      mouse_cnt++;
-    } else {
-      free(pInterface_detail);
-    }
-    free(property_buffer);
-    dev_count++;
-  }
-  NPNX_ASSERT(GetLastError() == ERROR_NO_MORE_ITEMS);
-  SetupDiDestroyDeviceInfoList(h_info);
-  
-  printf("\n");
-  for (int i = 0; i < mouse_cnt; i++) {
-    printf("found mouse: %ls\n", GetDevicePath(i));
-    HANDLE h_file = CreateFile(GetDevicePath(i),
-                                GENERIC_WRITE | GENERIC_READ,
-                                FILE_SHARE_WRITE | FILE_SHARE_READ,
-                                NULL,
-                                OPEN_EXISTING,
-                                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-                                NULL);
-    if (h_file == INVALID_HANDLE_VALUE) {
-      NPNX_ASSERT_LOG(!"h_file_invalid", GetLastError());
-    }
-    h_files.push_back(h_file);
-    HANDLE h_winusb;
-    NPNX_ASSERT_LOG(WinUsb_Initialize(h_file, &h_winusb), GetLastError());
-    h_winusbs.push_back(h_winusb);
-
-    //find the report length.
-    WINUSB_SETUP_PACKET controltransfer = {
-      0x81, 0x06, 0x2200, 0, 4096
-    };
-    UCHAR buf[4096];
-    DWORD length;
-    NPNX_ASSERT_LOG( 
-      WinUsb_ControlTransfer(h_winusb, controltransfer, buf, 4096, &length, NULL),
-      GetLastError()
-    );
-    for(int i = 0; i < (int)length; i++){
-      printf("%02hhx ", buf[i]);
-    }
-    printf("\n");
-    hid_report_size = get_hid_record_size(buf, length, HID_REPORT_TYPE_INPUT);
-    printf("report size : %d\n", hid_report_size);
+    int mouse_cnt = 0;
+    SP_DEVINFO_DATA devinfo_data;
+    SP_DEVICE_INTERFACE_DATA interface_data;
+    interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+    devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
+    int dev_count = 0;
+    while (SetupDiEnumDeviceInterfaces(h_info, NULL, &winDeviceInterfaceGuid, dev_count, &interface_data)) {
+        DWORD length;
+        bool suc = SetupDiGetDeviceInterfaceDetail(h_info, &interface_data, NULL, 0, &length, NULL);
+        NPNX_ASSERT(!suc && GetLastError() == ERROR_INSUFFICIENT_BUFFER);
 
 
-    if (target_report_interface != 0) {
-      HANDLE h_hidinterface;
-      NPNX_ASSERT_LOG(WinUsb_GetAssociatedInterface(h_winusb, target_report_interface - 1, &h_hidinterface),
-        GetLastError()
-      );
-      h_hidinterfaces.push_back(h_hidinterface);
-    } else {
-      h_hidinterfaces.push_back(h_winusb);
-    }
-  }
-  num_mouse = mouse_cnt;
-  return num_mouse;
+        PSP_DEVICE_INTERFACE_DETAIL_DATA pInterface_detail = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(length);
+        pInterface_detail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+        NPNX_ASSERT_LOG(SetupDiGetDeviceInterfaceDetail(h_info, &interface_data, pInterface_detail, length, NULL, &devinfo_data), GetLastError());
+        printf("%ls\n", pInterface_detail->DevicePath);
+
+        WCHAR* buff = pInterface_detail->DevicePath;
+        if (wcsstr(buff, L"bthenum") != NULL && wcsstr(buff, L"08e7") != NULL) { // filte Bluetooth (bthenum) Serial Port Profile Device (08e7)
+            BYTE PropertyVal[300];
+            if (SetupDiGetDeviceRegistryProperty(h_info, &devinfo_data, SPDRP_FRIENDLYNAME, NULL, PropertyVal, sizeof(PropertyVal), NULL))
+            {
+                int cch = WideCharToMultiByte(CP_ACP, 0, (LPCTSTR)PropertyVal, -1, 0, 0, NULL, NULL);
+                char* friendlyName = new char[cch];
+                WideCharToMultiByte(CP_ACP, 0, (LPCTSTR)PropertyVal, -1, friendlyName, cch, NULL, NULL);
+                std::cout << friendlyName << std::endl;
+                std::regex com_reg("(.*)(COM[0-9]+)(.*)");
+                std::cmatch m;
+                auto ret = std::regex_match(friendlyName, m, com_reg);
+                std::string tmp_str(m[2]);
+                tmp_str = "\\\\.\\" + tmp_str;
+                std::cout << "Find " << tmp_str << std::endl;
+                serial_names.push_back(tmp_str);
+                serial_interfaces.push_back(new SerialPort(tmp_str.data()));
+                position_raw_data_fifos.push_back(new PositionRawDataFifo);
+                position_raw_data_init_time.push_back(0);
+                delete[] friendlyName;
+            }
+            pInterface_details.push_back(pInterface_detail);
+            mouse_cnt++;
+        }
+        else {
+            free(pInterface_detail);
+        }
+        dev_count++;
+        }
+    NPNX_ASSERT(GetLastError() == ERROR_NO_MORE_ITEMS);
+    SetupDiDestroyDeviceInfoList(h_info);
+    printf("Find %d Devices\n", mouse_cnt);
+    num_mouse = mouse_cnt;
+    return num_mouse;
+
+    //char* port = "\\\\.\\COM3";
+    //SerialPort* sp;
+    //sp = new SerialPort(port);
+    ////my_serial.setTimeout(serial::Timeout::max(), 250, 0, 250, 0);
+    //serial_names.push_back(port);
+    //serial_interfaces.push_back(sp);
+    //position_raw_data_fifos.push_back(new PositionRawDataFifo);
+    //position_raw_data_init_time.push_back(0);
+    //num_mouse = 1;
+    //return num_mouse;
 }
 
 void MouseCore::Start() {
-  for (int i=0; i < num_mouse; i++) {
-    pollThread[i] = std::thread([&, this](int idx) { poll(idx); }, i);
-  }
+    for (int i = 0; i < num_mouse; i++) {
+        pollThread[i] = std::thread([&, this](int idx) { poll(idx); }, i);
+    }
 }
 
-int MouseCore::ControlTransfer(int mouse_idx, uint8_t request_type, uint8_t bRequest, uint16_t wValue, uint16_t wIndex,
-                    unsigned char *data, uint16_t wLength, unsigned int timeout) {
-  uint16_t realwLength = 4096 < wLength? 4096 : wLength;
-  NPNX_ASSERT(mouse_idx < num_mouse);
-  WINUSB_SETUP_PACKET controlSetup = {
-    request_type,
-    bRequest,
-    wValue,
-    wIndex,
-    realwLength
-  };
-  DWORD length;
+void MouseCore::Stop() {
+    shouldStop = true;
+}
 
-#ifdef USE_MOUSECORE_NATIVE_ASYNC
-  OVERLAPPED overlapped;
-  memset(&overlapped, 0, sizeof(OVERLAPPED));
-  HANDLE hEvent = CreateEvent(NULL, false, false, NULL);
-  NPNX_ASSERT_LOG(hEvent != NULL, GetLastError());
-  overlapped.hEvent = hEvent;
-  NPNX_ASSERT_LOG( 
-    WinUsb_ControlTransfer(h_winusbs[mouse_idx], controlSetup, data, realwLength, &length, &overlapped)
-    || GetLastError() == ERROR_IO_PENDING,
-    GetLastError()
-  );
-  GetOverlappedResult(h_winusbs[mouse_idx], &overlapped, &length, true);
-  CloseHandle(overlapped.hEvent);
-#else
-  NPNX_ASSERT_LOG( 
-    WinUsb_ControlTransfer(h_winusbs[mouse_idx], controlSetup, data, realwLength, &length, NULL),
-    GetLastError()
-  );
-#endif
+void PrintStringHex(std::string str) {
+    const char* buf = str.data();
+    for (int i = 0; i < str.length(); i++) {
+        printf("%.2X ", buf[i] & 0xff);
+    }
+    printf("\n");
+}
 
-  return length;
+void PrintHex(const unsigned char* data, int size) {
+    for (int i = 0; i < size; i++) {
+        printf("%.2X ", data[i] & 0xff);
+    }
+    printf("\n");
+}
+
+void PrintHex(const char* data, int size) {
+    for (int i = 0; i < size; i++) {
+        printf("%.2X ", data[i] & 0xff);
+    }
+    printf("\n");
+}
+
+void PrintFrameHex(const unsigned char* data, int size) {
+    for (int i = 0; i < size; i++) {
+        printf("%.2X ", data[i] & 0xff);
+        if (i % 30 == 29) printf("\n");
+    }
+    printf("\n");
+}
+
+// return the data size
+int MouseCore::GetPositionRawData(int idx, unsigned char* buf) {
+    SensorFifoReport tmp_report;
+    int total_report_count = position_raw_data_fifos[idx]->size();
+    if (total_report_count > 60) {
+        position_raw_data_fifos[idx]->Pop(&tmp_report);
+        for (int i = 0; i < SP_REPORT_SIZE; i++) {
+            buf[i] = tmp_report.data[i];
+        }
+        *(int64_t*)(buf + SP_REPORT_SIZE) = position_raw_data_init_time[idx];
+        int64_t nowtime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        position_raw_data_init_time[idx] += (nowtime - position_raw_data_init_time[idx]) / total_report_count;
+        return SP_REPORT_SIZE + 8;
+    }
+    else {
+        return 0;
+    }
+}
+
+void MouseCore::StopOrStartPositionDataReport(int idx) {
+    while (!serial_interfaces[idx]->isConnected()) {
+        Sleep(300);
+        serial_interfaces[idx] = new SerialPort(serial_names[idx].data());
+    }
+    char w_buf[1] = { 0xfe };
+    serial_interfaces[idx]->writeSerialPort(w_buf, 1);
+}
+
+int MouseCore::GetAngleRawData(int idx, unsigned char* buf) {
+    //printf("GetAngleRawData");
+    StopOrStartPositionDataReport(idx);
+    Sleep(50);
+    state = RECEIVING_ANGLE_DATA;
+    char preamble[] = { 0xff, 0x00, 0xff, 0x00, 0xff, 0xff };
+    while (!serial_interfaces[idx]->isConnected()) {
+        Sleep(300);
+        serial_interfaces[idx] = new SerialPort(serial_names[idx].data());
+    }
+
+    char w_buf[1] = { 0xff };
+    char tmp_buf[4096];
+    int buf_size = 2048;
+    const int required_data_size = 30 * 30;
+    int received_frame_data_size = 0;
+    int buf_data_size = 0;
+    bool half_frame = false;
+
+    int cnt = 0;
+    int64_t last_zero_data_cnt_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    serial_interfaces[idx]->writeSerialPort(w_buf, 1); // Start angle data report
+    while (received_frame_data_size < required_data_size) {
+        if (buf_data_size <= buf_size / 2) {
+            cnt = serial_interfaces[idx]->readSerialPort(tmp_buf + buf_data_size, buf_size / 2);
+        }
+        else {
+            cnt = serial_interfaces[idx]->readSerialPort(tmp_buf + buf_data_size, buf_size - buf_data_size);
+        }
+        if (cnt == 0 && serial_interfaces[idx]->isConnected()) {
+            int64_t now_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            if (now_time - last_zero_data_cnt_time > 1000000) {
+                serial_interfaces[idx]->writeSerialPort(w_buf, 1);
+                last_zero_data_cnt_time = now_time;
+            }
+        }
+        else {
+            //printf("Receive %d bytes\n", cnt);
+            last_zero_data_cnt_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        }
+        buf_data_size += cnt;
+
+        int consumed_data_size = 0;
+        if ((buf_data_size - consumed_data_size) >= 906) {
+            int start_index = consumed_data_size;
+            if (!memcmp(preamble, tmp_buf + start_index, sizeof(preamble))) {
+                //printf("Detect Angle Data\n");
+                consumed_data_size += sizeof(preamble);
+                int remained_frame_data_size = required_data_size - (buf_data_size - consumed_data_size);
+                int remained_buf_size = buf_size - buf_data_size;
+                while (remained_frame_data_size > 0 &&
+                    remained_buf_size >= remained_frame_data_size) {
+                    remained_frame_data_size -= serial_interfaces[idx]->readSerialPort(tmp_buf + buf_data_size, remained_frame_data_size);
+                }
+                memcpy(buf, tmp_buf + consumed_data_size, required_data_size);
+                //PrintFrameHex(buf, 900);
+                state = RECEIVING_POSITION_DATA;
+                StopOrStartPositionDataReport(idx);
+                return required_data_size;
+
+            }
+            else {
+                consumed_data_size++;
+            }
+        }
+        if (consumed_data_size > 0) {
+            buf_data_size -= consumed_data_size;
+            std::memcpy(buf, buf + consumed_data_size, buf_data_size);
+            memset(buf + buf_data_size, 0, buf_size - buf_data_size);
+        }
+    }
+    return 0;
 }
 
 void MouseCore::poll(int idx) {
-  while (!shouldStop) {
-    UCHAR buf[200];
-    DWORD length;
-#ifdef USE_MOUSECORE_NATIVE_ASYNC
-  OVERLAPPED overlapped;
-  memset(&overlapped, 0, sizeof(OVERLAPPED));
-  HANDLE hEvent = CreateEvent(NULL, false, false, NULL);
-  NPNX_ASSERT_LOG(hEvent != NULL, GetLastError());
-  overlapped.hEvent = hEvent;
-  NPNX_ASSERT_LOG( WinUsb_ReadPipe(h_hidinterfaces[idx], target_report_endpoint, buf, hid_report_size, &length, &overlapped)
-    || GetLastError() == ERROR_IO_PENDING,
-    GetLastError()
-  );
-  GetOverlappedResult(h_hidinterfaces[idx], &overlapped, &length, true);
-  CloseHandle(overlapped.hEvent);
+    char pos_pre[] = { 0xfe };
+    char pos_suf[] = { 0x00, 0xfe };
+    char preamble[] = { 0xfe, 0x00, 0xfe };
+    char buf[1024];
+    int data_size = 0;
+    const int buf_size = 1024; // should be even
+    std::cout << "Token " << idx << " Start.\n";
+    int cnt = 0;
+    int64_t last_zero_data_cnt_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    while (!shouldStop) {
+        if (state != RECEIVING_POSITION_DATA) {
+            Sleep(10);
+            continue;
+        }
 
-#else
-    NPNX_ASSERT_LOG( WinUsb_ReadPipe(h_hidinterfaces[idx], target_report_endpoint, buf, hid_report_size, &length, NULL),
-      GetLastError()
-    );
-#endif
-    mouseReportCallbackFunc(idx, raw_to_mousereport(buf, hid_report_size));
-  }
+        if (!serial_interfaces[idx]->isConnected()) {
+            Sleep(300);
+            serial_interfaces[idx] = new SerialPort(serial_names[idx].data());
+        }
+
+        if (data_size <= buf_size / 2) {
+            cnt = serial_interfaces[idx]->readSerialPort(buf + data_size, buf_size / 2);
+        }
+        else {
+            cnt = serial_interfaces[idx]->readSerialPort(buf + data_size, buf_size - data_size);
+        }
+        if (cnt == 0 && serial_interfaces[idx]->isConnected()) {
+            int64_t now_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            if (now_time - last_zero_data_cnt_time > 1000000) {
+                //std::cout << "Send 0xfe\n";
+                serial_interfaces[idx]->writeSerialPort(pos_pre, 1);
+                last_zero_data_cnt_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+            }
+        }
+        else {
+            last_zero_data_cnt_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        }
+        data_size += cnt;
+
+        int consumed_data_size = 0;
+        while ( (data_size - consumed_data_size) > (SP_REPORT_SIZE + sizeof(preamble)) ) {
+            int start_index = consumed_data_size;
+            char* tmp_buf = buf + start_index;
+            if (!memcmp(preamble, tmp_buf, sizeof(preamble))) {
+                //PrintHex(tmp_buf, SP_REPORT_SIZE + sizeof(preamble));
+                consumed_data_size += 3;
+                if (position_raw_data_fifos[idx]->empty()) {
+                    position_raw_data_init_time[idx] = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+                }
+                SensorFifoReport report(tmp_buf + sizeof(preamble));
+                //report.PrintHex();
+                position_raw_data_fifos[idx]->Push(report);
+                consumed_data_size += SP_REPORT_SIZE;
+            }
+            else {
+                consumed_data_size++;
+            }
+        }
+
+        if (consumed_data_size > 0) {
+            data_size -= consumed_data_size;
+            std::memcpy(buf, buf + consumed_data_size, data_size);
+            memset(buf+data_size, 0, buf_size-data_size);
+        }
+    }
+    std::cout << "MouseCore " << idx << " poll thread Stopped.\n";
 }
-
-MouseReport MouseCore::raw_to_mousereport(uint8_t *buffer, size_t size) {
-  //our mouse input report format is 
-  //bb xx yx yy ww
-  //b for button, w for wheel.
-  MouseReport result;
-  memset(&result, 0, sizeof(MouseReport));
-  result.flags = 0;
-  result.button = MOUSECORE_EXTRACT_BUFFER(buffer, size, 0, uint8_t);
-  uint8_t xxbyte = MOUSECORE_EXTRACT_BUFFER(buffer, size, 1, uint8_t);
-  uint8_t xybyte = MOUSECORE_EXTRACT_BUFFER(buffer, size, 2, uint8_t);
-  uint8_t yybyte = MOUSECORE_EXTRACT_BUFFER(buffer, size, 3, uint8_t);
-
-  result.xTrans = ((xybyte & 0x0f) << 8) + xxbyte;
-  if (result.xTrans & 0x0800) result.xTrans |= 0xf000; 
-  
-  result.yTrans = ((xybyte & 0xf0) >> 4) + (yybyte << 4);
-  if (result.yTrans & 0x0800) result.yTrans |= 0xf000;
-
-  result.wheel = MOUSECORE_EXTRACT_BUFFER(buffer, size, 4, int8_t);
-  if (result.wheel & 0x80) result.wheel |= 0xff00;
-
-  // printf("%02hhx %02hhx %02hhx\n", xxbyte, xybyte, yybyte);
-  // printf("%04hx %04hx\n", result.xTrans, result.yTrans);
-  return result;
-}
-

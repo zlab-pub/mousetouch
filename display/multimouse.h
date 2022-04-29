@@ -114,8 +114,10 @@ public:
 
   void PollMouseEvents();
 
-  HCIReport MultiMouseSystem::GetHCIReportByIndex(int index);
-  void MultiMouseSystem::ClearHCIReportByIndex(int index);
+  TokenReport GetTokenReportByIndex(int index);
+  void ClearTokenReportByIndex(int index);
+
+  void Stop();
 
 private:
   void checkNewMouse(int hDevice);  

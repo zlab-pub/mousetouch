@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 
 #include "imageUtils.h"
 #include "shader.h"
@@ -14,8 +15,28 @@
 
 using namespace npnx;
 
-const int num_position_texture = 248; // 248
-const int mod_position_texture = 64; // 64
+// Positioning Type     0
+// Debug Type (Whole)   1
+// Debug Type (Block)   2   
+#define Pos_Texture_Type 0
+#if Pos_Texture_Type == 0
+const int num_position_texture = 64;
+const std::string pos_texture_prefix = "fremw2_";
+const int n_mod = 62;
+
+#elif Pos_Texture_Type == 1
+const int num_position_texture = 8;
+const std::string pos_texture_prefix = "bit1_";
+const int n_mod = num_position_texture;
+#elif Pos_Texture_Type == 2
+const int num_position_texture = 10;
+const std::string pos_texture_prefix = "bit_";
+const int n_mod = num_position_texture;
+#elif Pos_Texture_Type == 3
+const int num_position_texture = 4;
+const std::string pos_texture_prefix = "bit2_";
+const int n_mod = num_position_texture;
+#endif
 int image_shift = 0;
 const int feedbackLength = 240;
 
@@ -91,7 +112,6 @@ public:
         // if NSteps is 0, do not update and wait to next large angle change
         // this can avoid unstablility due to error of angle estimation
         if (NSteps != 0) {
-            std::cout << this->lastAngle << ", addAAngle: " << addAngle << ", addRGB: " << addRGB << ", NSteps: " << NSteps << ", value : " << this->value;
             float tmpVal = this->angle + addAngle;
             this->angle = NSteps > 0 ? min(180.0f, tmpVal) : max(-180.0f, tmpVal);
             tmpVal = (this->angle + 180) / 360 * 255;
@@ -100,7 +120,6 @@ public:
             }
             // update R/G/B value
             this->value = NSteps > 0 ? min(255.0f, tmpVal) : max(0.0f, tmpVal);
-            std::cout << " to " << this->value << ", Angle: " << this->angle << std::endl;
             // update content of R/G/B textlayer
             target->content = std::to_string(this->value);
             return true;
@@ -139,11 +158,11 @@ public:
         }
     }
 
-    void Update(HCIReport hciReport) {
-        if (hciReport.isCompleted) {
+    void Update(TokenReport tokenReport) {
+        if (tokenReport.isCompleted) {
             for (int i = 0; i < 3; i++) {
-                if (tokens[i].IsInside(hciReport.x, hciReport.y)) {
-                    tokens[i].Update(hciReport.angle);
+                if (tokens[i].IsInside(tokenReport.x, tokenReport.y)) {
+                    tokens[i].Update(tokenReport.angle);
                 }
             }
         }
@@ -165,30 +184,22 @@ void InitGLFWWindow(GLFWwindow*& window) {
     glfwWindowHint(GLFW_AUTO_ICONIFY, GLFW_FALSE);
 
     int monitorCount;
-    GLFWmonitor** pMonitor = glfwGetMonitors(&monitorCount);
+    GLFWmonitor* pMonitor = glfwGetPrimaryMonitor();
+    int screen_x, screen_y;
+    const GLFWvidmode* mode = glfwGetVideoMode(pMonitor);
+    screen_x = mode->width;
+    screen_y = mode->height;
+    std::cout << "Screen size is X = " << screen_x << ", Y = " << screen_y << ", Refresh Rate = " << mode->refreshRate << std::endl;
 
-    int holographic_screen = -1;
-    for (int i = 0; i < monitorCount; i++) {
-        int screen_x, screen_y;
-        const GLFWvidmode* mode = glfwGetVideoMode(pMonitor[i]);
-        screen_x = mode->width;
-        screen_y = mode->height;
-        std::cout << "Screen size is X = " << screen_x << ", Y = " << screen_y << std::endl;
-        if (screen_x == WINDOW_WIDTH && screen_y == WINDOW_HEIGHT) {
-            holographic_screen = i;
-        }
-    }
-    NPNX_LOG(holographic_screen);
-
-
+    
 #if (defined __linux__ || defined NPNX_BENCHMARK)
     window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "My Title", NULL, NULL);
 
 #else
-    if (holographic_screen == -1)
+    if (pMonitor == NULL)
         window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "My Title", NULL, NULL);
     else
-        window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Holographic projection", pMonitor[holographic_screen], NULL);
+        window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Holographic projection", pMonitor, NULL);
 #endif  
 
     NPNX_ASSERT(window);
@@ -211,7 +222,7 @@ void InitGLFWWindow(GLFWwindow*& window) {
     glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
-
+    glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
     
 }
 
@@ -283,12 +294,12 @@ int main()
     }
     // Set Valid VLC Index: Left, Right, Bottom, Top
     token_[0].UpdateValidVLCIndex(5, 10, 4, 9);
-    token_[1].UpdateValidVLCIndex(22, 27, 4, 9);
-    token_[2].UpdateValidVLCIndex(22, 27, 20, 25);
+    token_[1].UpdateValidVLCIndex(22, 27, 20, 25);
+    token_[2].UpdateValidVLCIndex(22, 27, 4, 9);
 
     // renderer for board showing the color
     Renderer colorBoardRenderer(&defaultShader, 0);
-    RectLayer colorBoard(-1.0f, -1.0f, -3.0f / 16.0f, 1.0f, 1.0f);
+    RectLayer colorBoard(-1.0f, -1.0f, -3.0f / 16.0f, 1.0f, -1.0f);
     colorBoard.mTexture.push_back(makeTextureFromImage(NPNX_FETCH_DATA("whiteblock.png")));
     colorBoard.visibleCallback = [](int) {return true; };
     colorBoard.textureNoCallback = [&](int _) {return 0; };
@@ -311,24 +322,32 @@ int main()
     postRenderer.AddLayer(&postBaseRect);
     RectLayer postRect(-3.0f / 16.0f, -1.0f, 15.0f / 16.0f, 1.0f, 999.9f);
     for (int i = 0; i < num_position_texture; i++) {
-        std::string pos_texture_path = "fremw2_";
+        std::string pos_texture_path = pos_texture_prefix;
         pos_texture_path += std::to_string(i);
         pos_texture_path += ".png";
         postRect.mTexture.push_back(makeTextureFromImage(NPNX_FETCH_DATA(pos_texture_path)));
     }
     postRect.visibleCallback = [](int) {return true; };
-    postRect.textureNoCallback = [=](int nbFrames) {return nbFrames % mod_position_texture + image_shift; };
+    postRect.textureNoCallback = [=](int nbFrames) {return nbFrames % n_mod + image_shift; };
     postRenderer.AddLayer(&postRect);
     postRenderer.Initialize();
 
+    Renderer mouseRenderer(&defaultShader, fbo0);
     // renderer for angle estimation
     Renderer postMouseRenderer(&defaultShader, 0);
-    GLuint mouseWhiteBlockTex = makeTextureFromImage(NPNX_FETCH_DATA("whiteblock.png"));
+    GLuint mouseTex = makeTextureFromImage(NPNX_FETCH_DATA("cursor.png"));
+    GLuint mouseWhiteBlockTex = makeTextureFromImage(NPNX_FETCH_DATA("blueblock.png"));
     GLuint mouseRedBlockTex = makeTextureFromImage(NPNX_FETCH_DATA("redblock.png"));
     for (int i = 0; i < multiMouseSystem.cNumLimit; i++) {
-        const float blockVSize = 0.15f;
+        const float cursorSize = 0.1f;
+        RectLayer *cursorLayer = new RectLayer(0.0f, -cursorSize, cursorSize * WINDOW_HEIGHT / WINDOW_WIDTH, 0.0f, *(float *)&i);
+        cursorLayer->mTexture.push_back(mouseTex);
+        cursorLayer->visibleCallback = [](int) {return false; };
+        mouseRenderer.AddLayer(cursorLayer);
+
+        const float blockVSize = 0.15f; // 0.15f
         const float blockHSize = blockVSize * WINDOW_HEIGHT / WINDOW_WIDTH;
-        RectLayer* postColor = new RectLayer(-blockHSize / 2, -blockVSize / 2, blockHSize / 2, blockVSize / 2, *(float*)&i);
+        RectLayer *postColor = new RectLayer(-blockHSize / 2, -blockVSize / 2, blockHSize / 2, blockVSize / 2, *(float *)&i);
         postColor->mTexture.push_back(mouseRedBlockTex);
         postColor->mTexture.push_back(mouseWhiteBlockTex);
         postColor->visibleCallback = [](int) {return false; };
@@ -338,12 +357,23 @@ int main()
 
     multiMouseSystem.Init(mouse_button_callback, true);
     multiMouseSystem.RegisterPoseMouseRenderer(&postMouseRenderer);
-    multiMouseSystem.mEnableAngle = false;
+    multiMouseSystem.RegisterMouseRenderer(&mouseRenderer, [&](int) { return false; });
+    multiMouseSystem.mEnableAngle = true;
+    multiMouseSystem.hciToScreenPosFunc = [=](int p1, int p2, double* sx, double* sy) {
+        // (32,0)
+        //  |
+        // (0,0) -- (0,32)
+        int left = ((- 3.0f / 16.0f) + 1) / 2 * WINDOW_WIDTH;
+        int bottom = -1.0f;
+        *sx = p2 * 32 + left;
+        *sy = WINDOW_HEIGHT - p1 * 32;
+    };
 
     test_.nbFrames = 0;
     int lastNbFrames = 0;
     double lastTime = glfwGetTime();
-    while (!glfwWindowShouldClose(window))
+    while ( glfwGetKey(window, GLFW_KEY_ESCAPE ) != GLFW_PRESS &&
+             glfwWindowShouldClose(window) == 0 )
     {
         //before_every_frame();
 
@@ -379,10 +409,14 @@ int main()
         glfwPollEvents();
         multiMouseSystem.PollMouseEvents();
         for (int i = 0; i < 3; i++) {
-            test_.Update(multiMouseSystem.GetHCIReportByIndex(i));
-            multiMouseSystem.ClearHCIReportByIndex(i);
+             test_.Update(multiMouseSystem.GetTokenReportByIndex(i));
+             multiMouseSystem.ClearTokenReportByIndex(i);
         }
     }
+    // Todo Exit Program
+    std::cout << "GLFW Window Exit.\n";
+    multiMouseSystem.Stop();
+    mouseRenderer.FreeLayers();
     postMouseRenderer.FreeLayers();
     return 0;
 
