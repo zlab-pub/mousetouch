@@ -28,6 +28,7 @@ def chunk_decode(np_chunk, flip=False):
     for i in range(len(chunk)):
         if chunk[i:i+len(pat)] != pat:
             continue
+        # print("Dectec preamble: ", i)
         wait2decode = chunk[i+len(pat):i+len(pat)+(BITS_NUM+4) * EXPEND]
         if len(wait2decode) != (BITS_NUM + 4)* EXPEND:
             continue

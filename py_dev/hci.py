@@ -1,9 +1,9 @@
 import sys
 import time
-import win32pipe
 import win32file
 from multiprocessing import Queue, Process
-from comm_handler import TypeName, TypeID, data_packing, tagging_index
+from comm_handler import TypeID, data_packing, tagging_index
+from PIL import Image
 
 def pipe_client_read(pipe_name, q):
     print("pipe client for reading")
@@ -11,23 +11,9 @@ def pipe_client_read(pipe_name, q):
         win32file.GENERIC_READ | win32file.GENERIC_WRITE,
         0, None, win32file.OPEN_EXISTING, 0, None)
 
-    # try:
     while True:
         data = win32file.ReadFile(handle, 1024)
         q.put(data[1])
-        # type_id = data[1][0]
-        # if type_id == TypeID.POSITION:
-        #     t1 = (time.time(), data[1][1])
-        #     t2 = (time.time(), data[1][2])
-        #     q.put((TypeName.POSITION, t1, t2))
-        # elif type_id == TypeID.ANGLE:
-        #     resp = win32file.ReadFile(handle, 19 * 19)
-        #     q.put((TypeName.ANGLE, bytes_arr2_int_arr(resp)))
-
-    # except:
-    #     print('Inpipe Broken')
-    #     win32file.CloseHandle(handle)
-
 
 def pipe_client_write(pipe_name, q, idx):
     print("pipe client for writing")
@@ -105,7 +91,15 @@ if __name__ == '__main__':
             #     continue
                 
             # try:
-            ret = measurer.update(read_data[1:], func)
+            img_np = np.zeros(900)
+            tmp = read_data[1:]
+            for i in range(len(tmp)):
+                img_np[i] = read_data[i+1]
+            img_np = img_np.reshape((30, 30))
+            img = Image.fromarray(img_np)
+            img = img.convert('L')
+            ret = measurer.update_(img, func)
+            #ret = measurer.update(read_data[1:], func)
             # except:
             #     continue
             if ret is not None:
@@ -117,16 +111,13 @@ if __name__ == '__main__':
                 measurer.reset()
                 mode = 'LOCATION'
             count += 1
-            ts = int.from_bytes(read_data[-16:-8],'little') / (1e6)
-            ts2 = int.from_bytes(read_data[-8:],'little') / (1e6)
-            try:
-                ret = localizer.update(((ts, read_data[1]), (ts2, read_data[2])))
-            # except Exception as e:
-            except:
-            #     print(e)
-                continue
+
+            ts = int.from_bytes(read_data[-8:],'little') / (1e6)
+            
+            ret = localizer.update(ts, read_data[1:-8])
+            
             if ret is not None:
-                if time.time() - last_pos_ts > 1:
+                if time.time() - last_pos_ts > 0.3:
                     write_queue.put(data_packing(TypeID.POSITION, ret[0]))
                     print(ret[0])
                     last_pos_ts = time.time()
